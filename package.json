@@ -1,0 +1,26 @@
+{
+  "name": "beautxie-ai-media-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone BEAUTXIE AI WhatsApp media downloader and group-management bot.",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js",
+    "check": "node --check src/app.js && node --check src/whatsapp.js && node --check src/commands.js",
+    "postinstall": "node -e \"console.log('BEAUTXIE AI dependencies installed')\""
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "axios": "^1.8.4",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "mime-types": "^3.0.1",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
+    "sanitize-filename": "^1.6.3",
+    "google-play-scraper": "^10.1.0",
+    "@hapi/boom": "^10.0.1"
+  }
+}

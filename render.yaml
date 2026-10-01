@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: beautxie-ai-media-bot
+    runtime: docker
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: PORT
+        value: 10000
+      - key: BOT_NAME
+        value: BEAUTXIE AI
+      - key: BOT_PREFIX
+        value: /
+      - key: OWNER_NUMBER
+        sync: false
+      - key: GROUP_LINK
+        value: https://chat.whatsapp.com/HCMyjAafc7nArxo2xhi648?s=cl&p=a&mlu=4&ilr=4
+      - key: CHANNEL_LINK
+        value: https://whatsapp.com/channel/0029VbE9KJvJkK73C7RNvP2z
+      - key: OWNER_TOKEN
+        generateValue: true
+      - key: PAIRING_GROUP_JID
+        sync: false
+      - key: PAIRING_NUMBER
+        sync: false
+    disk:
+      name: beautxie-data
+      mountPath: /var/data
+      sizeGB: 2

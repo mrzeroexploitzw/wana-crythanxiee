@@ -9,6 +9,7 @@ ENV NPM_CONFIG_AUDIT=false
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        git \
         ffmpeg \
         python3 \
         python3-pip \
@@ -21,7 +22,10 @@ WORKDIR /app
 
 COPY package.json ./
 
-# More tolerant dependency installation
+RUN git --version \
+    && node --version \
+    && npm --version
+
 RUN npm install \
     --omit=dev \
     --legacy-peer-deps \

@@ -12,15 +12,24 @@ import { Boom } from "@hapi/boom";
 
 import { config } from "./config.js";
 import { brandImageBuffer } from "./cards.js";
-import { handleMessage, handleGroupParticipants } from "./commands.js";
+import {
+  handleMessage,
+  handleGroupParticipants
+} from "./commands.js";
 
 let sock = null;
 let connectedAt = null;
 let reconnectTimer = null;
 let starting = false;
 
+
+/*
+ * ============================================================
+ * START WHATSAPP
+ * ============================================================
+ */
+
 export async function startWhatsApp() {
-  // Prevent multiple sockets from being created at the same time.
   if (starting) {
     console.log("WhatsApp startup already in progress.");
     return sock;
@@ -29,89 +38,134 @@ export async function startWhatsApp() {
   starting = true;
 
   try {
-    const authResult = await useMultiFileAuthState(config.authDir);
-    const state = authResult.state;
-    const saveCreds = authResult.saveCreds;
+    const auth = await useMultiFileAuthState(
+      config.authDir
+    );
+
+    const state = auth.state;
+    const saveCreds = auth.saveCreds;
 
     sock = makeWASocket({
       auth: state,
-      browser: Browsers.ubuntu(config.botName || "BEAUTXIE AI"),
+
+      browser: Browsers.ubuntu(
+        config.botName || "BEAUTXIE AI"
+      ),
+
       logger: P({
         level: process.env.LOG_LEVEL || "info"
       }),
+
       markOnlineOnConnect: false,
       syncFullHistory: false,
       printQRInTerminal: false
     });
 
-    sock.ev.on("creds.update", saveCreds);
-
     /*
-     * ============================================================
-     * MESSAGE HANDLER
-     * ============================================================
-     */
-
-    sock.ev.on("messages.upsert", async function ({ messages }) {
-      for (const msg of messages) {
-        try {
-          await handleMessage(sock, msg);
-        } catch (error) {
-          console.error("Message handler error:", error);
-        }
-      }
-    });
-
-    /*
-     * ============================================================
-     * GROUP PARTICIPANT HANDLER
-     * ============================================================
+     * Save WhatsApp credentials.
      */
 
     sock.ev.on(
-      "group-participants.update",
-      async function (event) {
-        try {
-          await handleGroupParticipants(sock, event);
-        } catch (error) {
-          console.error("Group event error:", error);
+      "creds.update",
+      saveCreds
+    );
+
+
+    /*
+     * ========================================================
+     * MESSAGES
+     * ========================================================
+     */
+
+    sock.ev.on(
+      "messages.upsert",
+      async ({ messages }) => {
+        for (const msg of messages) {
+          try {
+            await handleMessage(
+              sock,
+              msg
+            );
+          } catch (error) {
+            console.error(
+              "Message handler error:",
+              error
+            );
+          }
         }
       }
     );
 
+
     /*
-     * ============================================================
-     * CONNECTION HANDLER
-     * ============================================================
+     * ========================================================
+     * GROUP PARTICIPANTS
+     * ========================================================
+     */
+
+    sock.ev.on(
+      "group-participants.update",
+      async (event) => {
+        try {
+          await handleGroupParticipants(
+            sock,
+            event
+          );
+        } catch (error) {
+          console.error(
+            "Group event error:",
+            error
+          );
+        }
+      }
+    );
+
+
+    /*
+     * ========================================================
+     * CONNECTION
+     * ========================================================
      */
 
     sock.ev.on(
       "connection.update",
-      async function (update) {
-        const connection = update.connection;
-        const lastDisconnect = update.lastDisconnect;
+      async (update) => {
+        const {
+          connection,
+          lastDisconnect
+        } = update;
+
 
         /*
-         * --------------------------------------------------------
-         * CONNECTION OPEN
-         * --------------------------------------------------------
+         * ----------------------------------------------------
+         * CONNECTED
+         * ----------------------------------------------------
          */
 
         if (connection === "open") {
           connectedAt = Date.now();
 
           console.log("");
-          console.log("======================================");
-          console.log(" BEAUTXIE AI");
-          console.log(" WhatsApp connection established");
-          console.log("======================================");
+          console.log(
+            "======================================"
+          );
+          console.log(
+            " BEAUTXIE AI"
+          );
+          console.log(
+            " WhatsApp connection established"
+          );
+          console.log(
+            "======================================"
+          );
           console.log("");
         }
 
+
         /*
-         * --------------------------------------------------------
-         * CONNECTION CLOSED
-         * --------------------------------------------------------
+         * ----------------------------------------------------
+         * DISCONNECTED
+         * ----------------------------------------------------
          */
 
         if (connection === "close") {
@@ -120,36 +174,46 @@ export async function startWhatsApp() {
           let statusCode = null;
 
           try {
-            statusCode = new Boom(lastDisconnect?.error)
-              .output?.statusCode;
+            statusCode =
+              new Boom(
+                lastDisconnect?.error
+              ).output?.statusCode;
           } catch (error) {
             statusCode = null;
           }
 
           console.error(
-            "WhatsApp connection closed. Status:",
+            "WhatsApp connection closed."
+          );
+
+          console.error(
+            "Disconnect status:",
             statusCode
           );
 
+
           /*
-           * Logged out means the saved WhatsApp credentials
-           * are no longer valid.
+           * Logged out.
            */
 
-          if (statusCode === DisconnectReason.loggedOut) {
+          if (
+            statusCode ===
+            DisconnectReason.loggedOut
+          ) {
             console.error(
               "WhatsApp session logged out."
             );
 
             console.error(
-              "Delete the authentication session and pair the account again."
+              "The account must be paired again."
             );
 
             return;
           }
 
+
           /*
-           * Avoid stacking multiple reconnect timers.
+           * Prevent multiple reconnect timers.
            */
 
           if (reconnectTimer) {
@@ -161,14 +225,14 @@ export async function startWhatsApp() {
           );
 
           reconnectTimer = setTimeout(
-            async function () {
+            async () => {
               reconnectTimer = null;
 
               try {
                 await startWhatsApp();
               } catch (error) {
                 console.error(
-                  "WhatsApp reconnect error:",
+                  "WhatsApp reconnect failed:",
                   error
                 );
               }
@@ -179,30 +243,24 @@ export async function startWhatsApp() {
       }
     );
 
+
     /*
-     * ------------------------------------------------------------
-     * PAIRING CODE
-     * ------------------------------------------------------------
-     *
-     * IMPORTANT:
-     * Do not wait for connection === "open".
-     *
-     * A new account cannot reach "open" until it has been paired.
-     *
-     * We start the pairing request after the socket has had a
-     * moment to initialize.
+     * ========================================================
+     * INITIAL PAIRING
+     * ========================================================
      */
 
     if (
       config.pairingNumber &&
       state.creds.registered === false
     ) {
-      const number = String(config.pairingNumber)
-        .replace(/\D/g, "");
+      const number =
+        String(config.pairingNumber)
+          .replace(/\D/g, "");
 
       if (!number) {
         console.error(
-          "Invalid pairing number in configuration."
+          "Invalid pairing number."
         );
       } else {
         console.log(
@@ -210,32 +268,27 @@ export async function startWhatsApp() {
         );
 
         console.log(
-          "Preparing pairing code for:",
-          number
+          "Preparing pairing code..."
         );
 
-        setTimeout(
-          async function () {
-            try {
-              /*
-               * Check that the same socket is still active.
-               */
 
+        /*
+         * Give the socket time to initialize.
+         */
+
+        setTimeout(
+          async () => {
+            try {
               if (!sock) {
                 console.error(
-                  "Cannot request pairing code: socket unavailable."
+                  "WhatsApp socket unavailable."
                 );
                 return;
               }
 
-              /*
-               * Check whether authentication completed during
-               * the startup delay.
-               */
-
               if (state.creds.registered) {
                 console.log(
-                  "WhatsApp account became registered before pairing code request."
+                  "Account already registered."
                 );
                 return;
               }
@@ -245,14 +298,27 @@ export async function startWhatsApp() {
               );
 
               const code =
-                await sock.requestPairingCode(number);
+                await sock.requestPairingCode(
+                  number
+                );
 
               console.log("");
-              console.log("======================================");
-              console.log(" BEAUTXIE AI PAIRING CODE");
-              console.log("======================================");
-              console.log("CODE:", code);
-              console.log("======================================");
+              console.log(
+                "======================================"
+              );
+              console.log(
+                " BEAUTXIE AI PAIRING CODE"
+              );
+              console.log(
+                "======================================"
+              );
+              console.log(
+                "CODE:",
+                code
+              );
+              console.log(
+                "======================================"
+              );
               console.log("");
 
               console.log(
@@ -272,7 +338,7 @@ export async function startWhatsApp() {
               );
 
               console.log(
-                "Enter the pairing code shown above."
+                "Enter the pairing code above."
               );
 
               console.log("");
@@ -289,25 +355,28 @@ export async function startWhatsApp() {
     }
 
     return sock;
+
   } finally {
     starting = false;
   }
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * GET SOCKET
- * ================================================================
+ * ============================================================
  */
 
 export function getSocket() {
   return sock;
 }
 
+
 /*
- * ================================================================
- * RESOLVE GROUP INVITE
- * ================================================================
+ * ============================================================
+ * GROUP INVITE
+ * ============================================================
  */
 
 export async function resolveGroupInvite(input) {
@@ -317,11 +386,13 @@ export async function resolveGroupInvite(input) {
     );
   }
 
-  const value = String(input || "").trim();
+  const value =
+    String(input || "").trim();
 
-  const match = value.match(
-    /chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i
-  );
+  const match =
+    value.match(
+      /chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i
+    );
 
   const code = match
     ? match[1]
@@ -336,7 +407,9 @@ export async function resolveGroupInvite(input) {
   }
 
   const info =
-    await sock.groupGetInviteInfo(code);
+    await sock.groupGetInviteInfo(
+      code
+    );
 
   return {
     ...info,
@@ -345,10 +418,11 @@ export async function resolveGroupInvite(input) {
   };
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * UPTIME
- * ================================================================
+ * ============================================================
  */
 
 export function getUptime() {
@@ -356,19 +430,23 @@ export function getUptime() {
     return "offline";
   }
 
-  const seconds = Math.floor(
-    (Date.now() - connectedAt) / 1000
-  );
+  const seconds =
+    Math.floor(
+      (Date.now() - connectedAt) / 1000
+    );
 
-  const hours = Math.floor(
-    seconds / 3600
-  );
+  const hours =
+    Math.floor(
+      seconds / 3600
+    );
 
-  const minutes = Math.floor(
-    (seconds % 3600) / 60
-  );
+  const minutes =
+    Math.floor(
+      (seconds % 3600) / 60
+    );
 
-  const secs = seconds % 60;
+  const secs =
+    seconds % 60;
 
   return (
     String(hours) +
@@ -380,10 +458,11 @@ export function getUptime() {
   );
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * BRANDED CARD
- * ================================================================
+ * ============================================================
  */
 
 export async function sendBrandedCard(
@@ -397,25 +476,28 @@ export async function sendBrandedCard(
     );
   }
 
-  const image = brandImageBuffer();
-
-  const mentions =
-    options.mentions &&
-    options.mentions.length
-      ? {
-          mentions: options.mentions
-        }
-      : {};
+  const image =
+    brandImageBuffer();
 
   const payload = image
     ? {
         image,
         caption,
-        ...mentions
+        ...(options.mentions?.length
+          ? {
+              mentions:
+                options.mentions
+            }
+          : {})
       }
     : {
         text: caption,
-        ...mentions
+        ...(options.mentions?.length
+          ? {
+              mentions:
+                options.mentions
+            }
+          : {})
       };
 
   if (options.quoted) {
@@ -423,7 +505,8 @@ export async function sendBrandedCard(
       jid,
       payload,
       {
-        quoted: options.quoted
+        quoted:
+          options.quoted
       }
     );
   }
@@ -434,13 +517,17 @@ export async function sendBrandedCard(
   );
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * SEND TEXT
- * ================================================================
+ * ============================================================
  */
 
-export async function sendText(jid, text) {
+export async function sendText(
+  jid,
+  text
+) {
   if (!sock) {
     throw new Error(
       "WhatsApp is not connected."
@@ -455,17 +542,19 @@ export async function sendText(jid, text) {
   );
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * SEND FILE
- * ================================================================
+ * ============================================================
  */
 
 export async function sendFile(
   jid,
   file,
   caption,
-  mimetype = "application/octet-stream"
+  mimetype =
+    "application/octet-stream"
 ) {
   if (!sock) {
     throw new Error(
@@ -480,18 +569,21 @@ export async function sendFile(
         url: file
       },
       mimetype,
-      fileName: String(file)
-        .split(/[\\/]/)
-        .pop(),
-      caption: caption || ""
+      fileName:
+        String(file)
+          .split(/[\\/]/)
+          .pop(),
+      caption:
+        caption || ""
     }
   );
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * SEND MEDIA
- * ================================================================
+ * ============================================================
  */
 
 export async function sendMedia(
@@ -506,7 +598,8 @@ export async function sendMedia(
     );
   }
 
-  const data = fs.readFileSync(file);
+  const data =
+    fs.readFileSync(file);
 
   let payload;
 
@@ -527,7 +620,8 @@ export async function sendMedia(
   }
 
   if (caption) {
-    payload.caption = caption;
+    payload.caption =
+      caption;
   }
 
   return sock.sendMessage(
@@ -536,10 +630,11 @@ export async function sendMedia(
   );
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * GROUP METADATA
- * ================================================================
+ * ============================================================
  */
 
 export async function groupMetadata(jid) {
@@ -552,10 +647,11 @@ export async function groupMetadata(jid) {
   return sock.groupMetadata(jid);
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * PROFILE PICTURE
- * ================================================================
+ * ============================================================
  */
 
 export async function updateProfilePicture(
@@ -568,7 +664,8 @@ export async function updateProfilePicture(
     );
   }
 
-  const data = fs.readFileSync(file);
+  const data =
+    fs.readFileSync(file);
 
   return sock.updateProfilePicture(
     jid,
@@ -578,21 +675,25 @@ export async function updateProfilePicture(
   );
 }
 
+
 /*
- * ================================================================
+ * ============================================================
  * MANUAL PAIRING CODE
- * ================================================================
+ * ============================================================
  */
 
-export async function requestPairingCode(number) {
+export async function requestPairingCode(
+  number
+) {
   if (!sock) {
     throw new Error(
       "WhatsApp is not connected."
     );
   }
 
-  const cleanNumber = String(number || "")
-    .replace(/\D/g, "");
+  const cleanNumber =
+    String(number || "")
+      .replace(/\D/g, "");
 
   if (!cleanNumber) {
     throw new Error(
